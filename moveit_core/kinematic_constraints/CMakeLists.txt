@@ -42,9 +42,11 @@ install(DIRECTORY include/ DESTINATION include)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
-
-  ament_add_gtest(test_constraints test/test_constraints.cpp
-    APPEND_LIBRARY_DIRS "${append_library_dirs}"
-  )
+  find_package(Eigen3 REQUIRED)
+  
+  ament_add_gtest(test_constraints test/test_constraints.cpp APPEND_LIBRARY_DIRS "${append_library_dirs}")
   target_link_libraries(test_constraints moveit_test_utils ${MOVEIT_LIB_NAME})
+
+  ament_add_gtest(test_orientation_constraints test/test_orientation_constraints.cpp)
+  target_link_libraries(test_orientation_constraints moveit_test_utils ${MOVEIT_LIB_NAME})
 endif()
