@@ -385,4 +385,101 @@ std::shared_ptr<BaseConstraint> createOMPLConstraint(const moveit::core::RobotMo
     return nullptr;
   }
 }
+
+/******************************************
+ * Toolpath Constraint
+ * ****************************************/
+ToolPathConstraint::ToolPathConstraint(const moveit::core::RobotModelConstPtr& robot_model, const std::string& group,
+                                       unsigned int num_dofs, unsigned int steps)
+  : BaseConstraint(robot_model, group, num_dofs), num_steps_(steps)
+{
+  NearestNeighbors<geometry_msgs::msg::Pose>::DistanceFunction func =
+      std::bind(&poseDistance, std::placeholders::_1, std::placeholders::_2);
+
+  pose_nn_.setDistanceFunction(func);
+}
+
+void ToolPathConstraint::setPath(const moveit_msgs::msg::CartesianTrajectory& msg)
+{
+  // TODO: Should this be done in the constructor? What happens when we want to accept another msg?
+
+  // Clear previous path
+  pose_nn_.clear();
+
+  // Interpolate along waypoints and insert into pose_nn_;
+  const auto dt = 1.0 / static_cast<double>(num_steps_);
+  for (unsigned int i = 0; i < msg.points.size() - 1; i++)
+  {
+    // Insert waypoints
+    pose_nn_.add(msg.points.at(i).point.pose);
+
+    // Insert interpolated poses
+    auto step = dt;
+    for (unsigned int j = 0; j < num_steps_ - 1; j++)
+    {
+      const auto pose = poseInterpolator(msg.points.at(i).point.pose, msg.points.at(i + 1).point.pose, step);
+      pose_nn_.add(pose);
+      step += dt;
+    }
+  }
+
+  // Insert last waypoint
+  pose_nn_.add(msg.points.at(msg.points.size() - 1).point.pose);
+}
+
+
+void ToolPathConstraint::function(const Eigen::Ref<const Eigen::VectorXd>& joint_values, Eigen::Ref<Eigen::VectorXd> out) const
+{
+  // TODO: Add path constraint function
+  // Ideal: F(q_actual) - F(q_neared_pose) = 0
+
+}
+
+
+
+double poseDistance(const geometry_msgs::msg::Pose& pose1, const geometry_msgs::msg::Pose& pose2)
+{
+  const auto dx = pose1.position.x - pose2.position.x;
+  const auto dy = pose1.position.y - pose2.position.y;
+  const auto dz = pose1.position.z - pose2.position.z;
+
+  // Distance between two quaternions
+  // https://math.stackexchange.com/questions/90081/quaternion-distance
+
+  // dot product between q1 and q2
+  const auto qdotprod = pose1.orientation.w * pose2.orientation.w + pose1.orientation.x * pose2.orientation.x +
+                        pose1.orientation.y * pose2.orientation.y + pose1.orientation.z * pose2.orientation.z;
+
+  // Euclidean + Quaternion Distance
+  return std::sqrt(dx * dx + dy * dy + dz * dz) + (1.0 - qdotprod * qdotprod);
+}
+
+geometry_msgs::msg::Pose poseInterpolator(const geometry_msgs::msg::Pose& pose1, const geometry_msgs::msg::Pose& pose2,
+                                          double step)
+{
+  // Pose interpolation
+  // https://answers.ros.org/question/299691/interpolation-for-between-two-poses/
+
+  const Eigen::Vector3d t1(pose1.position.x, pose1.position.y, pose1.position.z);
+  const Eigen::Vector3d t2(pose2.position.x, pose2.position.y, pose2.position.z);
+
+  const Eigen::Quaterniond q1(pose1.orientation.w, pose1.orientation.x, pose1.orientation.y, pose1.orientation.z);
+  const Eigen::Quaterniond q2(pose2.orientation.w, pose2.orientation.x, pose2.orientation.y, pose2.orientation.z);
+
+  const Eigen::Vector3d interp_translation = (1.0 - step) * t1 + step * t2;
+  const Eigen::Quaterniond interp_orientation = q1.slerp(step, q2);
+
+  geometry_msgs::msg::Pose interp_pose;
+  interp_pose.position.x = interp_translation.x();
+  interp_pose.position.y = interp_translation.y();
+  interp_pose.position.z = interp_translation.z();
+
+  interp_pose.orientation.w = interp_orientation.w();
+  interp_pose.orientation.x = interp_orientation.x();
+  interp_pose.orientation.y = interp_orientation.y();
+  interp_pose.orientation.z = interp_orientation.z();
+
+  return interp_pose;
+}
+
 }  // namespace ompl_interface
